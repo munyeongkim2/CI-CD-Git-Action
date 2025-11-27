@@ -1,19 +1,34 @@
+#전체 workflow의 이름
 name: PRD branch 배포
 
-#트리거 조건
+#Event
+#트리거 조건 : PRD에 push 될 때 아래 workflow를 실행
 on:
   push:
     branches: [ "PRD" ]
 
-#수행할 task들
+#하나의 workflow는 1개 이상의 job으로 구성
+#여러개의 job은 기본적으로 병렬적으로 수행
 jobs:
-  build:
-    # 🚨 원격 GitHub 호스팅 러너 사용 (로컬 러너 아님)
+  #job 식별 위한 id
+  hello-build:
+    #원격 GitHub 호스팅 러너 사용 (로컬 러너 아님)
     runs-on: ubuntu-latest
+
+    #step : 특정 작업을 수행하는 가장 작은 단위
+    #job은 여러 스텝들로 구성
     steps:
+      #스텝의 이름
+      - name: 깃허브 액션 자체에 저장되어 있는 변수 사용해보기
+        run: |
+          echo $GITHUB_SHA # 커밋 uuid
+          echo $GITHUB_REPOSITORY
+
+      #빌드나 배포를 하려면 가장 먼저 해당 브랜치(PRD)의 최신 소스 코드를 Runner 환경으로 가져와야 합니다.
       - name: 1. Checkout Code
         uses: actions/checkout@v4
 
+      #JAR 파일을 빌드하기 위해 Runner에 Java 25 환경을 설치하고 설정합니다.
       - name: 2. Set up JDK 25
         uses: actions/setup-java@v4
         with:
@@ -21,6 +36,7 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      #Gradle 빌드에 필요한 캐시를 복원하여 빌드 시간을 단축합니다.
       - name: 3. Build with Gradle
         uses: actions/cache@v4
         with:
@@ -31,14 +47,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      #Gradle 명령을 실행하여 소스 코드를 컴파일하고, 배포할 CICD-0.0.1-SNAPSHOT.jar 파일을 생성합니다.
       - name: 4. Build Project
-        run: ./gradlew clean build -x test
+        run: ./gradlew clean build -x test #리눅스 명령어 사용
 
       # --- 💡 SSH/SCP 배포 설정 ---
+      #SSH 키를 로드하고, 접속할 호스트(공인 IP)에 대한 인증 준비를 완료합니다.
       - name: 5. Configure SSH Key (사용자 생성 인증서)
         uses: webfactory/ssh-agent@v0.9.1
         with:
           # 🚨 중요: 로컬 PC에 접근하기 위한 개인 SSH 키를 Secrets에 저장 후 사용
+          # 깃허브 액션에 내가 저장한 시크릿 값. 이 값은 깃헙액션에서 ***라고 뜸
           ssh-private-key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
 
       - name: 6. Add Known Host (보안 문제로 호스트 키 검증을 생략하거나, 수동으로 추가해야 함)
@@ -49,32 +68,35 @@ jobs:
           # ngrok의 경우 호스트 키가 매번 바뀔 수 있으므로, 엄격하게 검증하기 어렵습니다.
           # 안전한 방법: ssh-keyscan $HOST >> ~/.ssh/known_hosts
 
+      # Runner는 SCP 프로토콜을 사용하여 로컬 PC의 /Users/mun/deploy/ 경로로 빌드된 .jar 파일을 전송합니다. (첫 번째 네트워크 통신)
       - name: 7. Deploy via SCP to Local PC
         # 🚨 중요: ${{ secrets.LOCAL_DEPLOY_USER }}는 로컬 PC의 사용자 이름입니다.
         # 🚨 중요: ${{ secrets.LOCAL_DEPLOY_HOST }}와 ${{ secrets.LOCAL_DEPLOY_PORT }}는 1단계에서 얻은 정보입니다.
-        uses: appleboy/scp-action@v0.1.7
-        with:
+        uses: appleboy/scp-action@v0.1.7 #라이브러리 사용
+        with: #옵션 (접속 및 인증 정보)
           host: ${{ secrets.LOCAL_DEPLOY_HOST }}
           username: ${{ secrets.LOCAL_DEPLOY_USER }}
-          # 사용자 생성 인증서 사용
-          key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
+          key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }} # 사용자 생성 인증서 사용
           port: ${{ secrets.LOCAL_DEPLOY_PORT }}
           source: build/libs/*.jar # 빌드된 파일 경로
           target: /Users/mun/deploy/ # 로컬 PC의 배포 대상 경로
           strip_components: 2 # 빌드 경로를 제외하고 파일만 복사 (필요에 따라 조정)
 
-      # ... (이전 1~7번 Step은 동일합니다: Checkout, Cache, Build, SCP 전송 완료)
-
+      # Runner는 SSH 프로토콜을 사용하여 로컬 PC에 원격으로 접속한 후, kill 및 nohup java -jar 명령을 실행합니다. (두 번째 네트워크 통신 및 원격 제어)
       - name: 8. Restart Service and Run on 8080 Port (SSH를 통한 원격 명령 실행)
         uses: appleboy/ssh-action@v1.0.3
+#        env:
+#          APPLICATION_PROPERTIES: ${{ secrets.LOCAL_DEPLOY_HOST }}
         with:
           host: ${{ secrets.LOCAL_DEPLOY_HOST }}
           username: ${{ secrets.LOCAL_DEPLOY_USER }}
           key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
           port: ${{ secrets.LOCAL_DEPLOY_PORT }}
+#          envs: APPLICATION_PROPERTIES
           script: |
             DEPLOY_PATH="/Users/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/"
             JAR_NAME="CICD-0.0.1-SNAPSHOT.jar" # 🚨 실제 빌드된 JAR 파일 이름으로 변경
+            # JAR_NAME="*SNAPSHOT.jar" 이것도 가능
             
             echo "✅ 기존 프로세스 확인 및 종료 (8080 포트 사용)"
             # 8080 포트를 사용하는 프로세스를 찾아서 강제 종료
