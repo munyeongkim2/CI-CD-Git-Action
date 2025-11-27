@@ -39,12 +39,12 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.1
         with:
           # 🚨 중요: 로컬 PC에 접근하기 위한 개인 SSH 키를 Secrets에 저장 후 사용
-          ssh-private-key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }} #저장완
+          ssh-private-key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
 
       - name: 6. Add Known Host (보안 문제로 호스트 키 검증을 생략하거나, 수동으로 추가해야 함)
         # 실제 ngrok 주소나 공인 IP를 Secrets에 저장하여 사용
         run: |
-          HOST=${{ secrets.LOCAL_DEPLOY_HOST }} #저장완
+          HOST=${{ secrets.LOCAL_DEPLOY_HOST }} 
           # Known Hosts에 호스트 키를 추가하여 SSH 연결 시 검증 오류를 방지
           # ngrok의 경우 호스트 키가 매번 바뀔 수 있으므로, 엄격하게 검증하기 어렵습니다.
           # 안전한 방법: ssh-keyscan $HOST >> ~/.ssh/known_hosts
@@ -55,10 +55,10 @@ jobs:
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.LOCAL_DEPLOY_HOST }}
-          username: ${{ secrets.LOCAL_DEPLOY_USER }}#저장완
+          username: ${{ secrets.LOCAL_DEPLOY_USER }}
           # 사용자 생성 인증서 사용
-          key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}#저장완
-          port: ${{ secrets.LOCAL_DEPLOY_PORT }}#저장완
+          key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
+          port: ${{ secrets.LOCAL_DEPLOY_PORT }}
           source: build/libs/*.jar # 빌드된 파일 경로
           target: /home/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/ # 로컬 PC의 배포 대상 경로
           strip_components: 2 # 빌드 경로를 제외하고 파일만 복사 (필요에 따라 조정)
