@@ -60,7 +60,7 @@ jobs:
           key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
           port: ${{ secrets.LOCAL_DEPLOY_PORT }}
           source: build/libs/*.jar # 빌드된 파일 경로
-          target: /home/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/ # 로컬 PC의 배포 대상 경로
+          target: /Users/mun/deploy/ # 로컬 PC의 배포 대상 경로
           strip_components: 2 # 빌드 경로를 제외하고 파일만 복사 (필요에 따라 조정)
 
       # ... (이전 1~7번 Step은 동일합니다: Checkout, Cache, Build, SCP 전송 완료)
