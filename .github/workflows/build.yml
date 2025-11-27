@@ -1,0 +1,96 @@
+name: PRD branch 배포
+
+#트리거 조건
+on:
+  push:
+    branches: [ "PRD" ]
+
+#수행할 task들
+jobs:
+  build:
+    # 🚨 원격 GitHub 호스팅 러너 사용 (로컬 러너 아님)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 2. Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'openjdk'
+          cache: gradle
+
+      - name: 3. Build with Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: 4. Build Project
+        run: ./gradlew clean build -x test
+
+      # --- 💡 SSH/SCP 배포 설정 ---
+      - name: 5. Configure SSH Key (사용자 생성 인증서)
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          # 🚨 중요: 로컬 PC에 접근하기 위한 개인 SSH 키를 Secrets에 저장 후 사용
+          ssh-private-key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }} #저장완
+
+      - name: 6. Add Known Host (보안 문제로 호스트 키 검증을 생략하거나, 수동으로 추가해야 함)
+        # 실제 ngrok 주소나 공인 IP를 Secrets에 저장하여 사용
+        run: |
+          HOST=${{ secrets.LOCAL_DEPLOY_HOST }} #저장완
+          # Known Hosts에 호스트 키를 추가하여 SSH 연결 시 검증 오류를 방지
+          # ngrok의 경우 호스트 키가 매번 바뀔 수 있으므로, 엄격하게 검증하기 어렵습니다.
+          # 안전한 방법: ssh-keyscan $HOST >> ~/.ssh/known_hosts
+
+      - name: 7. Deploy via SCP to Local PC
+        # 🚨 중요: ${{ secrets.LOCAL_DEPLOY_USER }}는 로컬 PC의 사용자 이름입니다.
+        # 🚨 중요: ${{ secrets.LOCAL_DEPLOY_HOST }}와 ${{ secrets.LOCAL_DEPLOY_PORT }}는 1단계에서 얻은 정보입니다.
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LOCAL_DEPLOY_HOST }}
+          username: ${{ secrets.LOCAL_DEPLOY_USER }}#저장완
+          # 사용자 생성 인증서 사용
+          key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}#저장완
+          port: ${{ secrets.LOCAL_DEPLOY_PORT }}#저장완
+          source: build/libs/*.jar # 빌드된 파일 경로
+          target: /home/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/ # 로컬 PC의 배포 대상 경로
+          strip_components: 2 # 빌드 경로를 제외하고 파일만 복사 (필요에 따라 조정)
+
+      # ... (이전 1~7번 Step은 동일합니다: Checkout, Cache, Build, SCP 전송 완료)
+
+      - name: 8. Restart Service and Run on 8080 Port (SSH를 통한 원격 명령 실행)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LOCAL_DEPLOY_HOST }}
+          username: ${{ secrets.LOCAL_DEPLOY_USER }}
+          key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
+          port: ${{ secrets.LOCAL_DEPLOY_PORT }}
+          script: |
+            DEPLOY_PATH="/home/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/"
+            JAR_NAME="your-app-name-0.0.1-SNAPSHOT.jar" # 🚨 실제 빌드된 JAR 파일 이름으로 변경
+            
+            echo "✅ 기존 프로세스 확인 및 종료 (8080 포트 사용)"
+            # 8080 포트를 사용하는 프로세스를 찾아서 강제 종료
+            # Linux 환경 명령어:
+            PROCESS_ID=$(lsof -t -i:8080 || true)
+            if [ -n "$PROCESS_ID" ]; then
+              kill -9 $PROCESS_ID
+              echo "프로세스 ID $PROCESS_ID 종료됨."
+            else
+              echo "8080 포트에서 실행 중인 기존 프로세스가 없습니다."
+            fi
+            
+            echo "✅ 새로운 JAR 파일 실행 및 8080 포트 바인딩"
+            # 백그라운드에서 새로운 JAR 파일을 실행합니다.
+            # nohup 명령을 사용하여 SSH 세션이 종료되어도 계속 실행되도록 합니다.
+            # --server.port=8080 옵션을 명시적으로 지정하여 실행합니다.
+            nohup java -jar -Dserver.port=8080 $DEPLOY_PATH$JAR_NAME > /dev/null 2>&1 &
+            
+            echo "서비스 재시작 완료. 로컬호스트 8080에서 실행 중인지 확인하세요."
