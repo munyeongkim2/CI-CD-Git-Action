@@ -73,8 +73,8 @@ jobs:
           key: ${{ secrets.LOCAL_DEPLOY_SSH_KEY }}
           port: ${{ secrets.LOCAL_DEPLOY_PORT }}
           script: |
-            DEPLOY_PATH="/home/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/"
-            JAR_NAME="your-app-name-0.0.1-SNAPSHOT.jar" # 🚨 실제 빌드된 JAR 파일 이름으로 변경
+            DEPLOY_PATH="/Users/${{ secrets.LOCAL_DEPLOY_USER }}/deploy/"
+            JAR_NAME="CICD-0.0.1-SNAPSHOT.jar" # 🚨 실제 빌드된 JAR 파일 이름으로 변경
             
             echo "✅ 기존 프로세스 확인 및 종료 (8080 포트 사용)"
             # 8080 포트를 사용하는 프로세스를 찾아서 강제 종료
